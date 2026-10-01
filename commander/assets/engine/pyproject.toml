@@ -1,0 +1,70 @@
+[project]
+name = "commander"
+version = "0.1.0"
+description = "Commander dispatch layer - routes tasks to agent SDKs across local and remote hosts"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "typer>=0.15",
+    "rich>=13.0",
+    "pydantic>=2.7",
+    "pyyaml>=6.0",
+    "tomli-w>=1.0",
+    "python-dotenv>=1.0",
+]
+
+# 注意：agent SDK 后端 **不在** 本工程内，各自独立成 uv 工程，见 bin/backends/<sdk>/。
+# 原因（实测）：crewai>=1.15.22 要求 pydantic>=2.11.9,<2.13，
+#              而 hermes-agent 0.19.0 要求 pydantic==2.13.4 —— 硬冲突，无法共存于同一 venv。
+# 因此每个后端一个 venv，由 dispatch 层以子进程 + stdin/stdout JSON 契约调用。
+[project.optional-dependencies]
+# httpx 用于 openai_compat 兜底适配器与 ssh 探测
+http      = ["httpx>=0.27"]
+
+[project.scripts]
+commander = "commander.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/commander"]
+
+[tool.uv]
+package = true
+
+[tool.ruff]
+# 本项目注释与文档串以中文为主，中文信息密度高于拉丁字符，
+# 按 100 列会频繁误报，放宽到 110。
+line-length = 110
+target-version = "py312"
+exclude = [".venv", "backends/*/.venv"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "C4", "SIM", "RUF", "S", "BLE", "PLW", "ISC", "EXE"]
+ignore = [
+    # 派发层必须兜住一切异常并转成合法的 RunResult ——
+    # 漏一个异常出去，指挥官就只会看到"进程非零退出且无结果"，无从诊断。
+    "BLE001",
+    # 同上：吞掉日志写入失败，避免掩盖真正的原始错误
+    "S110",
+    # subprocess 的成败由我们自己判 returncode（要看 stdout 内容再决定），
+    # 用 check=True 会让我们拿不到输出
+    "PLW1510",
+    # typer 的 `x: str = typer.Option(...)` 是官方写法
+    "B008",
+    # 探测脚本不要求可执行位
+    "EXE002",
+    # 本项目通篇中文，全角标点与汉字必然触发"歧义 Unicode"告警 —— 属于噪音
+    "RUF001", "RUF002", "RUF003",
+    # subprocess 的参数全部由我们自己构造，不走 shell、不用户可控
+    "S603", "S607",
+    # assert 只用在内部不变量与自检上，不用来做输入校验
+    "S101",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# 后端 runner 是独立进程的入口，风格约束放宽
+"backends/**" = ["E402"]   # sys.path 注入必须在 import 之前
+

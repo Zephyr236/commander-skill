@@ -1,0 +1,9 @@
+[project]
+name = "commander-backend-claude"
+version = "0.1.0"
+description = "Claude Agent SDK 后端（import claude_agent_sdk）"
+requires-python = ">=3.12"
+dependencies = ["claude-agent-sdk>=0.2.160"]
+
+[tool.uv]
+package = false

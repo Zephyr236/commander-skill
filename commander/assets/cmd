@@ -1,0 +1,40 @@
+#!/bin/sh
+# ══════════════════════════════════════════════════════════════════════════
+# 指挥官启动器
+#
+#   ./.commander/cmd <子命令> [参数...]
+#
+# 例：
+#   ./.commander/cmd patrol --oneline
+#   ./.commander/cmd dispatch scout -p "调研 X"
+#
+# 存在的意义：让**两种工作区布局共用同一个命令路径**，技能文档因此只需
+# 写一套命令，不必为每种布局各写一遍（那是错误的主要来源）。
+#
+#   扁平布局   工作区根/bin/pyproject.toml        引擎就在上一级
+#   内嵌布局   .commander/bin/pyproject.toml      引擎与本脚本同级
+#
+# 工作区根由 .commander-root 标记文件决定，commander 自己会向上查找。
+# ══════════════════════════════════════════════════════════════════════════
+set -eu
+
+here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+
+if [ -f "$here/bin/pyproject.toml" ]; then
+    engine="$here"                                    # 内嵌布局
+elif [ -f "$here/../bin/pyproject.toml" ]; then
+    engine=$(CDPATH= cd -- "$here/.." && pwd)         # 扁平布局
+else
+    printf '找不到指挥官引擎。\n' >&2
+    printf '  在 %s 及其上一级都没找到 bin/pyproject.toml\n' "$here" >&2
+    printf '  若引擎在别处，用 COMMANDER_ROOT 环境变量显式指定工作区根。\n' >&2
+    exit 1
+fi
+
+if ! command -v uv >/dev/null 2>&1; then
+    printf '需要 uv（本项目全部 Python 调用依赖它，无需 pip）。\n' >&2
+    printf '  安装: curl -LsSf https://astral.sh/uv/install.sh | sh\n' >&2
+    exit 1
+fi
+
+exec uv run --project "$engine/bin" commander "$@"

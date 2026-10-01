@@ -1,0 +1,162 @@
+# ══════════════════════════════════════════════════════════════════════════
+# Agent 编制表 —— 指挥官的下属名册
+#
+# 每一项 = 一个可被派发的下属。指挥官按任务特征挑选合适的一个或多个。
+# 每个 agent 在 agents/<id>/ 下有独立工作目录，由 guard.py 强制隔离。
+#
+#   backend   用哪个 SDK 驱动（决定子进程用哪个 venv，见 bin/backends/）
+#   model     用 models.toml 里登记的哪个模型
+#   target    local | remote | auto   —— 在哪台机器上跑
+#   skills    默认赋予的技能（派发时可增减）
+# ══════════════════════════════════════════════════════════════════════════
+
+# ── 自测用：不花钱，不联网 ────────────────────────────────────────────────
+
+[agents.smoke]
+backend     = "mock"
+model       = "mock"
+target      = "local"
+skills      = ["recon"]
+max_tokens  = 1024
+timeout     = 120
+description = """
+冒烟测试兵。零成本跑通全链路：派发 → 目录隔离 → 事件流 → 留痕 → outbox。
+改动指挥官自身后，先用它验证链路没坏，再上真模型。
+"""
+
+# ── 轻量后端：本地可跑 ─────────────────────────────────────────────────────
+# 本地仅 2 核 / 2Gi，只放得下轻量 SDK。
+
+[agents.scout]
+backend     = "claude"
+model       = "flash"
+target      = "local"
+skills      = ["recon", "summarize"]
+max_tokens  = 8192
+timeout     = 900
+description = """
+侦察兵。快速调研、读代码、摸清事实、回答"这里到底是怎么回事"。
+产出应是结论 + 证据路径，不是原始文件堆砌。
+适用：任务开始前的环境勘察、依赖关系梳理、方案可行性摸底。
+"""
+
+[agents.analyst]
+backend     = "openai"
+model       = "flash"
+target      = "local"
+skills      = ["analyze", "summarize"]
+max_tokens  = 16384
+timeout     = 1800
+description = """
+分析师。拿侦察结果做深度推理：找根因、做权衡、出方案对比。
+适用：为什么失败、哪个方案更优、风险在哪、边界条件是什么。
+"""
+
+[agents.anthropic_probe]
+backend     = "openai_compat"
+model       = "flash"
+target      = "local"
+skills      = []
+max_tokens  = 4096
+timeout     = 300
+description = """
+轻量探针。纯 httpx 直连 OpenAI 兼容端点，不依赖任何 SDK。
+适用：验证 API 可用性、联通性自检、给指挥官一个最便宜的健康检查手段。
+"""
+
+# ── 重依赖后端：必须落远端（40 核 / 20Gi） ─────────────────────────────────
+
+# ── 浏览器：上网查、能操作网页 ────────────────────────────────────────────
+# 用户需求：「这个agent主要是用于操作浏览器的，可以进行一定的搜索任务」
+#          「寻找网上的开源项目是否可以直接使用来完成任务」
+#          「去网上寻找相关的知识 skills 等等」
+
+[agents.browser]
+backend     = "browser_use"
+model       = "flash"
+# auto：由「哪台机器有 Chrome」决定落点，不写死
+target      = "auto"
+skills      = ["web-research", "summarize", "vet-solution"]
+max_tokens  = 8192
+timeout     = 3600
+# browser-use 的「步」粒度很细（点一次、滚一次都算），轮数上限要给宽
+max_turns   = 30
+# cdp_url 指向本机/远端的无头浏览器（用 `commander browser up` 启动）。
+# 不给的话 browser-use 会自己去找 —— 实测在无头服务器上会超时，
+# 因为它默认找 Playwright 的 chromium 而不是系统 Chrome。
+options     = { use_vision = false, headless = true, cdp_url = "http://127.0.0.1:9222" }
+description = """
+浏览器操作手。真的打开 Chrome 去查东西 —— 搜索、翻文档、读 GitHub 仓库、
+比对候选方案。产出是「结论 + 可点击的来源」，不是搜索结果列表。
+
+**落点由「哪台机器有浏览器」决定**（target=auto），不写死：
+   本机有浏览器就本地跑，否则落远端。
+
+⚠️ 用法前提：机器上要有一个已运行的 Chromium。它自己不下载浏览器。
+   没有的话：`./.commander/cmd browser up --install-browser`（下 ~187MB）。
+
+典型用途：
+  · 查某个 API/库的现状与最佳实践
+  · 找有没有现成的开源项目能直接用来完成任务
+  · 找有没有现成的 agent 框架/技能可以接入
+适用：需要外部信息、而本地文件和已有记忆都答不上来时。
+"""
+
+[agents.reasoner]
+backend     = "langchain"
+model       = "pro"
+target      = "remote"
+skills      = ["analyze", "plan"]
+max_tokens  = 32768
+timeout     = 3600
+max_turns   = 25
+description = """
+多步推理者。基于 langgraph 的 create_agent 做带工具的多轮自主循环。
+适用：需要反复试错、逐步逼近、中途调用工具的长链条任务。
+"""
+
+[agents.crew]
+backend     = "crewai"
+model       = "pro"
+target      = "remote"
+skills      = ["analyze", "write"]
+max_tokens  = 32768
+timeout     = 5400
+description = """
+角色扮演小组。CrewAI 内部再分角色（研究/写作/审校）做流水线协作。
+⚠️ 136 个依赖包，本地装不下，必须远端执行。
+适用：需要多角色分工的产出型任务（长文档、调研报告）。
+"""
+
+[agents.debater]
+backend     = "autogen"
+model       = "pro"
+target      = "remote"
+skills      = ["analyze", "critique"]
+max_tokens  = 8192
+timeout     = 3600
+# ⚠️ max_turns 对 AutoGen 是**消息数**而非轮数：RoundRobin 里
+#    max_messages = max(3, max_turns)，三个角色各说一轮就吃掉 3 条。
+#    实测设 20 会让一次派发跑 25 分钟以上（每轮都是推理模型）。
+#    6 条 ≈ 每个角色发言两轮，足够形成一次完整的正-反-裁。
+max_turns   = 6
+description = """
+多方辩手。AutoGen 多智能体对话，让不同立场互相挑战。
+⚠️ AutoGen 已进入维护模式（微软转向 MAF），新任务优先选 reasoner/crew。
+仅在"需要对抗性观点碰撞"时使用。
+适用：方案评审、红蓝对抗、找自己没想到的漏洞。
+"""
+
+[agents.hermes]
+backend     = "hermes"
+model       = "flash"
+target      = "remote"
+skills      = ["recon"]
+max_tokens  = 16384
+timeout     = 3600
+description = """
+自改进探索者。Hermes 内置技能自生成与持久记忆循环，经 ACP 协议驱动。
+适用：开放式探索、需要它自己迭代出方法的任务。
+"""
+
+# 由 `commander agent-new` 于生成，可直接手工编辑。

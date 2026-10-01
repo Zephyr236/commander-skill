@@ -1,0 +1,9 @@
+[project]
+name = "commander-backend-mock"
+version = "0.1.0"
+description = "零依赖的 mock 后端，用于验证目录契约与留痕链路，不产生任何网络请求"
+requires-python = ">=3.12"
+dependencies = []
+
+[tool.uv]
+package = false

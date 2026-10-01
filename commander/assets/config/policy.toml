@@ -1,0 +1,105 @@
+# ══════════════════════════════════════════════════════════════════════════
+# 派发策略 —— 指挥官的行为边界
+#
+# 这份文件是"指挥官能做什么、不能做什么"的硬约束，由 dispatch.py 强制执行。
+# ══════════════════════════════════════════════════════════════════════════
+
+[concurrency]
+# 本地实测 2 核 / 可用 2Gi；远端 40 核 / 可用 20Gi。
+# 保守取值，宁可排队也不要 OOM。
+local  = 2
+remote = 8
+
+[budget]
+# 单次派发的 token 硬上限（输入+输出合计）
+max_tokens_per_run = 200000
+# 单次派发的墙钟时间上限（秒）；agents.toml 的 timeout 可覆盖
+default_timeout    = 1800
+
+# ── 预警阈值 ──────────────────────────────────────────────────────────────
+# 预算不是刹车，是信号。到达这些水位就生成结构化状态报告交给指挥官决策。
+# 注意是**比例**，对四个维度统一生效（取最紧张的那一维）。
+[budget.thresholds]
+warn     = 0.60   # 开始提示，但不阻断
+critical = 0.85   # 接近上限，必须做决策
+
+# ── 成本权重 ──────────────────────────────────────────────────────────────
+# 不要求你填精确单价，但成本必须进决策。按模型的 cost_tier 折算成"成本单位"：
+#     cost_units = tokens / 1M × 权重
+# 这一维永远可用、跨模型可比，足以支撑"用贵的模型值不值"这类判断。
+# 如果 models.toml 里给某个模型填了真实 pricing，就自动换成真钱（cost_usd）。
+[budget.cost_weights]
+free     = 0.0
+cheap    = 1.0
+standard = 3.0
+premium  = 9.0
+
+# ── 三层预算 ──────────────────────────────────────────────────────────────
+# global  跨所有任务的总盘（时间窗内）
+# task    单个任务（可在任务档案里单独覆盖）
+# agent   单个下属（可在 agents.toml 里单独覆盖）
+#
+# 四个维度独立设限，判定时取**最紧张的那一维**。某一维省略 = 该维不限。
+# 数字按需调整 —— 这里给的是保守默认值。
+
+[budget.global]
+tokens       = 20000000    # 2000 万 token
+cost_units   = 40          # 约等于 4000 万 cheap token 或 440 万 premium token
+wall_seconds = 86400       # 24 小时
+core_seconds = 2000000     # 算力：墙钟 × 核数
+runs         = 400
+
+[budget.task]
+tokens       = 3000000
+cost_units   = 9
+wall_seconds = 14400       # 4 小时
+runs         = 60
+
+[budget.agent]
+tokens       = 1500000
+cost_units   = 6
+wall_seconds = 7200        # 2 小时
+runs         = 30
+
+[retry]
+# 失败重试次数。仅对「可重试错误」生效（网络超时、429、5xx）。
+max_attempts  = 2
+backoff_base  = 5      # 秒，指数退避
+retry_on      = ["timeout", "rate_limit", "server_error", "connection"]
+
+[guard]
+# 目录契约的强制开关。关掉会破坏"每个 agent 只能在自己的目录工作"的保证，
+# 只应在调试 dispatch 层自身时临时关闭。
+enforce_workdir_isolation = true
+
+# 子进程沙箱。实测过的重要区别：
+#   cwd 隔离只约束**相对路径** —— 子进程用绝对路径照样能写任何地方
+#   （mock 后端实测成功写出了 memory/_mock_probe.md，逃逸了）
+# 所以需要 bubblewrap 做内核级强制：整个文件系统挂只读，只把 agent 自己的
+# 目录挂回可写。memory/、别的 agent、.claude/、.git/、工作区外全部写不进。
+#
+#   auto  —— 有 bwrap 就用（推荐）。本机实测 /usr/bin/bwrap 可用
+#   bwrap —— 强制要求，没有就报错（生产环境建议这个，避免静默降级）
+#   none  —— 只用 cwd 隔离。⚠️ 此时目录契约只是约定，不是强制
+sandbox = "auto"
+
+# 允许写 memory/ 的身份白名单。除此外一律拒绝。
+memory_writers = ["commander", "memory-scout"]
+# 单次派发允许写入的目录（相对工作区根）。agent 的 workdir 会自动加入。
+writable_roots = ["agents/", "logs/", "tasks/", "remote/logs/"]
+# 任何情况下都禁止写入（含指挥官自身）。
+denied_roots   = [".git/", ".claude/"]
+
+[approval]
+# 需要指挥官显式确认才执行的动作。dispatch 遇到时返回 needs_approval 而不执行。
+require_for = [
+  "remote_destructive",   # 远端 rm/mv/覆盖
+  "git_push",
+  "credential_change",
+]
+
+[selection]
+# 指挥官选模型/agent 的默认倾向。
+prefer_cost_tier      = "cheap"      # 能用便宜的就别用贵的
+avoid_status          = ["maintenance"]  # 不优先选维护中的后端
+default_parallel_angles = 3          # 一个任务默认拆几个角度并行

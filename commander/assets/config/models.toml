@@ -1,0 +1,92 @@
+# ══════════════════════════════════════════════════════════════════════════
+# 大模型 API 注册表
+#
+# 指挥官持有多套 API。这里登记「能用哪些模型」，agents.toml 登记「谁用哪个」。
+# 密钥一律不写在本文件里，只写环境变量名（api_key_env），实际值在 bin/.env。
+# ══════════════════════════════════════════════════════════════════════════
+
+# ── Provider ──────────────────────────────────────────────────────────────
+# 一个 provider = 一个可调用的 API 端点集合。
+#   kind = "openai_compatible"  → 兼容 /v1/chat/completions，几乎所有 SDK 都能接
+#   kind = "anthropic_compatible" → 兼容 /v1/messages，供 Claude Agent SDK 使用
+# 两者可同时提供（DeepSeek 就是），此时两个 base_url 都填。
+
+[providers.deepseek]
+kind               = "openai_compatible"
+base_url           = "https://api.deepseek.com/v1"
+anthropic_base_url = "https://api.deepseek.com/anthropic"
+api_key_env        = "DEEPSEEK_API_KEY"
+# 实测：两个端点均已验证连通（chat + function calling + /v1/messages）
+verified           = "2026-09-28"
+notes              = "OpenAI 兼容与 Anthropic 兼容双端点。无 curl，探测请用 python3 urllib。"
+
+# 以下为预留槽位，填上 api_key 环境变量即可启用，无需改代码。
+[providers.openai]
+kind        = "openai_compatible"
+base_url    = "https://api.openai.com/v1"
+api_key_env = "OPENAI_API_KEY"
+enabled     = false
+notes       = "注意：openai-agents 接非 OpenAI 端点时必须显式走 ChatCompletions，见 backend runner。"
+
+[providers.anthropic]
+kind               = "anthropic_compatible"
+anthropic_base_url = "https://api.anthropic.com"
+api_key_env        = "ANTHROPIC_API_KEY"
+enabled            = false
+
+# ── Model ─────────────────────────────────────────────────────────────────
+# 指挥官选模型时看这几个字段：
+#   cost_tier        cheap | standard | premium  —— 省钱优先时选 cheap
+#   is_reasoning     true 表示会产出 reasoning_content，占用 max_tokens 预算
+#   max_tokens_floor 该模型安全的 max_tokens 下限（推理模型必须给足）
+#   supports_tools   能否 function calling
+#   status           active | degraded | maintenance  —— maintenance 的不优先选
+
+[models.flash]
+provider          = "deepseek"
+model             = "deepseek-flash"
+display           = "DeepSeek-V4.1-Flash"
+context           = 1048576
+max_output        = 393216
+cost_tier         = "cheap"
+supports_tools    = true
+supports_vision   = true
+is_reasoning      = true
+max_tokens_floor  = 4096
+status            = "active"
+effort_levels     = ["low", "high", "max"]
+# 可选：真实单价（美元 / 1M tokens）。填了经济成本就用真钱算；
+# 不填则用 cost_tier 折算成"成本单位"—— 决策照常进行，只是数字是相对量。
+# pricing = { input = 0.0, output = 0.0, cached_input = 0.0 }
+notes             = """
+主力执行模型。默认选它。
+⚠️ 实测坑：这是推理模型，max_tokens 给小了会被 reasoning_content 吃光，
+   返回 finish_reason=length 且 content 为空。16 tokens 时必现。
+   指挥官派发时若未指定 max_tokens，dispatch 层会自动套用 max_tokens_floor。
+"""
+
+[models.pro]
+provider          = "deepseek"
+model             = "deepseek-v4-pro"
+display           = "DeepSeek-V4-Pro"
+context           = 1048576
+max_output        = 393216
+cost_tier         = "standard"
+supports_tools    = true
+supports_vision   = false
+is_reasoning      = true
+max_tokens_floor  = 4096
+status            = "active"
+effort_levels     = ["low", "high", "max"]
+notes             = "复杂规划、长链条推理时用。纯文本，无视觉。"
+
+[models.mock]
+provider          = "local"
+model             = "mock"
+display           = "Mock (离线自测)"
+cost_tier         = "free"
+supports_tools    = false
+is_reasoning      = false
+max_tokens_floor  = 1
+status            = "active"
+notes             = "零成本端到端自测用。不产生任何网络请求，用于验证目录契约与留痕链路。"

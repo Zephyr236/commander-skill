@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "permissions": {
+    "allow": [
+      "Bash(./.commander/cmd:*)",
+      "Bash(uv run --project .commander/bin:*)",
+      "Bash(uv sync --project .commander/bin/backends/*)",
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Read(.commander/**)"
+    ],
+    "deny": [
+      "Read(.commander/bin/.env)",
+      "Read(.commander/bin/.env.*)",
+      "Read(.commander/remote/keys/**)",
+      "Bash(rm -rf /*)",
+      "Bash(git push:*)"
+    ]
+  },
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "./.commander/cmd patrol --oneline --no-write 2>/dev/null || true",
+            "timeout": 60,
+            "statusMessage": "指挥官巡检中…"
+          }
+        ]
+      }
+    ]
+  }
+}

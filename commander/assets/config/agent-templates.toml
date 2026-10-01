@@ -1,0 +1,184 @@
+# ══════════════════════════════════════════════════════════════════════════
+# Agent 模板 —— 指挥官「按需定制下属」的起点
+#
+# 用户需求原文：「指挥官就可以按需定制完成任务的agent」
+#
+# 编制表 (agents.toml) 里的那 9 个是常备部队。但真实任务千变万化，
+# 指挥官需要能**当场造一个**符合当前需要的下属：
+#
+#   ./.commander/cmd agent-new api-auditor --template reviewer
+#   ./.commander/cmd agent-new perf-hunter --backend openai --model pro \
+#       --skills analyze,critique -d "专攻性能瓶颈定位，产出必须带压测数据"
+#
+# 模板只提供默认值，任何字段都能被命令行覆盖。想加自己的模板就往这个文件里加。
+#
+# 字段说明（与 agents.toml 完全一致）：
+#   backend     用哪个 SDK 驱动，决定子进程跑在哪个 venv 里
+#   model       用 models.toml 里登记的哪个模型别名
+#   target      local | remote | auto
+#               auto 的规则：重依赖落远端、轻量留本地；
+#               需要浏览器的（browser_use）由「哪台机器有浏览器」决定
+#   skills      默认赋予的技能，派发时可用 --skills 覆盖
+#   max_tokens  单次派发的 token 上限
+#   timeout     墙钟超时（秒）
+#   max_turns   多轮 agent 的最大轮数（对 AutoGen 是消息数）
+# ══════════════════════════════════════════════════════════════════════════
+
+# ── 调研与事实 ────────────────────────────────────────────────────────────
+
+[templates.researcher]
+backend     = "claude"
+model       = "flash"
+target      = "local"
+skills      = ["recon", "summarize"]
+max_tokens  = 8192
+timeout     = 900
+max_turns   = 20
+description = """
+调研员。摸清一件事的现状：在哪、谁在用、依赖什么、改动会波及什么。
+产出必须是「结论 + 证据路径」，不是原始文件堆砌。
+适用：任务开始前摸清地形、梳理依赖关系、评估影响面。
+"""
+
+# ── 分析与判断 ────────────────────────────────────────────────────────────
+
+[templates.analyst]
+backend     = "openai"
+model       = "flash"
+target      = "local"
+skills      = ["analyze", "summarize"]
+max_tokens  = 16384
+timeout     = 1800
+max_turns   = 20
+description = """
+分析师。拿事实做深度推理：找根因、做权衡、出方案对比。
+适用：为什么失败、哪个方案更优、风险在哪、边界条件是什么。
+"""
+
+[templates.reviewer]
+backend     = "openai"
+model       = "pro"
+target      = "local"
+skills      = ["critique", "analyze"]
+max_tokens  = 16384
+timeout     = 1800
+max_turns   = 20
+description = """
+审查员。**默认方案有问题** —— 主动找漏洞、隐含假设、失败模式。
+产出：每个问题都要有触发条件和后果，说不出触发条件的不算问题。
+适用：方案评审、代码审查、上线前把关。
+"""
+
+[templates.planner]
+backend     = "langchain"
+model       = "pro"
+target      = "remote"
+skills      = ["plan", "analyze"]
+max_tokens  = 32768
+timeout     = 3600
+max_turns   = 25
+description = """
+规划师。把模糊目标拆成可执行、可验收、有依赖顺序的步骤。
+每一步都要写得出客观的验收标准 —— 写不出就是还没想清楚。
+适用：大型改造的路径设计、里程碑拆分、关键路径识别。
+"""
+
+# ── 产出与实现 ────────────────────────────────────────────────────────────
+
+[templates.implementer]
+backend     = "claude"
+model       = "flash"
+target      = "local"
+skills      = ["plan"]
+max_tokens  = 32768
+timeout     = 3600
+max_turns   = 30
+description = """
+实现者。按已定的方案写代码或改配置。产出物写在它自己的工作目录里，
+由指挥官取回后决定如何落地。
+适用：写脚本、改配置、生成重复性代码。
+"""
+
+[templates.writer]
+backend     = "crewai"
+model       = "pro"
+target      = "remote"
+skills      = ["write", "summarize"]
+max_tokens  = 32768
+timeout     = 5400
+max_turns   = 10
+description = """
+撰写者。CrewAI 内部再分角色（研究/写作/审校）走流水线，产出成稿。
+⚠️ 136 个依赖包，必须落远端。
+适用：长文档、调研报告、需要多轮打磨的交付物。
+"""
+
+[templates.tester]
+backend     = "openai"
+model       = "flash"
+target      = "local"
+skills      = ["analyze"]
+max_tokens  = 16384
+timeout     = 2400
+max_turns   = 20
+description = """
+验证者。不是「跑一遍看看」，而是设计能证伪的检查：
+边界值、并发、部分失败、超时、空输入。
+产出：验证了什么、没验证什么、结论的置信度。
+适用：改动后的回归验证、假设的实证检验。
+"""
+
+# ── 上网 ──────────────────────────────────────────────────────────────────
+
+[templates.web-scout]
+backend     = "browser_use"
+model       = "flash"
+target      = "auto"
+skills      = ["web-research", "summarize"]
+max_tokens  = 8192
+timeout     = 3600
+max_turns   = 30
+# cdp_url 不给的话 browser-use 会自己找浏览器，在无头服务器上实测会超时
+options     = { use_vision = false, headless = true, cdp_url = "http://127.0.0.1:9222" }
+description = """
+网上侦察。真的打开浏览器去查：搜索、翻文档、读仓库、比对候选。
+产出必须是「结论 + 可点击来源」，不是一串链接。
+
+落点由「哪台机器有浏览器」决定（target=auto）。
+没浏览器的话先：./.commander/cmd browser up --install-browser
+适用：本地文件和记忆都答不上来、需要外部信息时。
+"""
+
+[templates.solution-hunter]
+backend     = "browser_use"
+model       = "pro"
+target      = "auto"
+skills      = ["web-research", "vet-solution", "critique"]
+max_tokens  = 16384
+timeout     = 5400
+max_turns   = 40
+options     = { use_vision = false, headless = true, cdp_url = "http://127.0.0.1:9222" }
+description = """
+现成方案猎手。专门找「有没有人能直接用」——
+开源项目、现成的 agent 框架、别人的技能包。
+
+产出必须带**可执行的接入判断**：能不能接？怎么接（新后端 / 子进程 / 直接抄）？
+维护状态、license、依赖重量、和现有架构的冲突点各是什么。
+
+用 pro 是因为「值不值得引入一个外部依赖」需要真做权衡，不是查资料。
+"""
+
+# ── 轻量 ──────────────────────────────────────────────────────────────────
+
+[templates.prober]
+backend     = "openai_compat"
+model       = "flash"
+target      = "local"
+skills      = []
+max_tokens  = 4096
+timeout     = 300
+max_turns   = 5
+description = """
+探针。纯 httpx 直连，不依赖任何 agent SDK，最便宜最快。
+适用：验证端点连通性、做健康检查、给指挥官一个最省钱的问一句话手段。
+"""

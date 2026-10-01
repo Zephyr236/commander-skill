@@ -1,0 +1,12 @@
+[project]
+name = "commander-backend-autogen"
+version = "0.1.0"
+description = "AutoGen 后端（多智能体对抗式讨论）"
+requires-python = ">=3.12"
+dependencies = [
+    "autogen-agentchat>=0.7.5",
+    "autogen-ext[openai]>=0.7.5",
+]
+
+[tool.uv]
+package = false
